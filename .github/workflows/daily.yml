@@ -1,0 +1,29 @@
+name: Podcast Dashboard ETL
+
+on:
+  schedule:
+    - cron: '0 10 * * *'  # 10am UTC / 5am CDT daily
+  workflow_dispatch:        # allow manual runs from GitHub UI
+
+jobs:
+  run-etl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run ETL
+        env:
+          YOUTUBE_CLIENT_SECRETS: ${{ secrets.YOUTUBE_CLIENT_SECRETS }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          MEGAPHONE_API_KEY: ${{ secrets.MEGAPHONE_API_KEY }}
+          MEGAPHONE_NETWORK_ID: ${{ secrets.MEGAPHONE_NETWORK_ID }}
+        run: python etl.py
