@@ -73,11 +73,8 @@ def fetch_yt_channel_metrics(creds, for_date):
         "shares": int(row[3]),
     }
 
-def fetch_yt_video_metrics(creds, start, end):
-    analytics = build("youtubeAnalytics", "v2", credentials=creds)
-    data_svc = build("youtube", "v3", credentials=creds)
-
-    resp = analytics.reports().query(
+def _query_yt_videos(analytics, data_svc, start, end, content_filter=None):
+    kwargs = dict(
         ids="channel==MINE",
         startDate=start.isoformat(),
         endDate=end.isoformat(),
@@ -85,31 +82,40 @@ def fetch_yt_video_metrics(creds, start, end):
         metrics="views,averageViewPercentage",
         sort="-views",
         maxResults=25,
-    ).execute()
+    )
+    if content_filter:
+        kwargs["filters"] = f"creatorContentType=={content_filter}"
 
-    rows = resp.get("rows") or []
+    rows = analytics.reports().query(**kwargs).execute().get("rows") or []
     if not rows:
         return []
 
     video_ids = [r[0] for r in rows]
-    vid_resp = data_svc.videos().list(
-        part="snippet", id=",".join(video_ids)
-    ).execute()
-    snippets = {v["id"]: v["snippet"] for v in vid_resp.get("items", [])}
+    snippets = {
+        v["id"]: v["snippet"]
+        for v in data_svc.videos().list(
+            part="snippet", id=",".join(video_ids)
+        ).execute().get("items", [])
+    }
 
-    results = []
-    for row in rows:
-        vid_id = row[0]
-        snip = snippets.get(vid_id, {})
-        results.append({
-            "video_id": vid_id,
-            "title": snip.get("title", vid_id),
-            "thumbnail": snip.get("thumbnails", {}).get("high", {}).get("url", ""),
-            "published_at": snip.get("publishedAt", "")[:10],
+    return [
+        {
+            "video_id": row[0],
+            "title": snippets.get(row[0], {}).get("title", row[0]),
+            "thumbnail": snippets.get(row[0], {}).get("thumbnails", {}).get("high", {}).get("url", ""),
+            "published_at": snippets.get(row[0], {}).get("publishedAt", "")[:10],
             "views": int(row[1]),
             "avg_view_pct": round(float(row[2]), 2),
-        })
-    return results
+        }
+        for row in rows
+    ]
+
+def fetch_yt_video_metrics(creds, start, end):
+    analytics = build("youtubeAnalytics", "v2", credentials=creds)
+    data_svc = build("youtube", "v3", credentials=creds)
+    videos = _query_yt_videos(analytics, data_svc, start, end, "videoOnDemand")
+    shorts = _query_yt_videos(analytics, data_svc, start, end, "shorts")
+    return {"videos": videos, "shorts": shorts}
 
 # ── Megaphone ─────────────────────────────────────────────────────────────────
 
@@ -196,19 +202,31 @@ def main():
 
         # YouTube video breakdown
         if not row_exists(ws_yt_vid, week_start.isoformat()):
-            videos = fetch_yt_video_metrics(creds, week_start, week_end)
-            for v in videos:
+            result = fetch_yt_video_metrics(creds, week_start, week_end)
+            videos = result["videos"]
+            shorts = result["shorts"]
+            all_content = videos + shorts
+            for v in all_content:
                 ws_yt_vid.append_row([week_start.isoformat()] + list(v.values()))
-            print(f"YouTube video metrics written for week of {week_start} ({len(videos)} videos)")
+            print(f"YouTube video metrics written for week of {week_start} ({len(videos)} videos, {len(shorts)} shorts)")
 
             if videos:
                 top = max(videos, key=lambda x: x["views"])
                 ws_top.append_row([
-                    week_start.isoformat(), "YouTube",
+                    week_start.isoformat(), "YouTube Video",
                     top["video_id"], top["title"],
                     top["thumbnail"], top["views"], "views",
                 ])
                 print(f"Top YouTube video: {top['title']} ({top['views']} views)")
+
+            if shorts:
+                top_short = max(shorts, key=lambda x: x["views"])
+                ws_top.append_row([
+                    week_start.isoformat(), "YouTube Short",
+                    top_short["video_id"], top_short["title"],
+                    top_short["thumbnail"], top_short["views"], "views",
+                ])
+                print(f"Top YouTube Short: {top_short['title']} ({top_short['views']} views)")
 
         # Megaphone episode breakdown
         ws_meg = get_or_create_sheet(sheet, "Megaphone_Episodes", [
