@@ -43,6 +43,8 @@ def current_week():
 def get_or_create_sheet(spreadsheet, name, headers):
     try:
         ws = spreadsheet.worksheet(name)
+        if not ws.row_values(1):
+            ws.append_row(headers)
     except gspread.WorksheetNotFound:
         ws = spreadsheet.add_worksheet(title=name, rows=10000, cols=len(headers))
         ws.append_row(headers)
