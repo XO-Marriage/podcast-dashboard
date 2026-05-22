@@ -60,17 +60,15 @@ def fetch_yt_channel_metrics(creds, for_date):
         ids="channel==MINE",
         startDate=d,
         endDate=d,
-        metrics="views,impressions,impressionsCtr,averageViewPercentage,subscribersGained,shares",
+        metrics="views,averageViewPercentage,subscribersGained,shares",
     ).execute()
-    row = (resp.get("rows") or [[0] * 6])[0]
+    row = (resp.get("rows") or [[0] * 4])[0]
     return {
         "date": d,
         "views": int(row[0]),
-        "impressions": int(row[1]),
-        "ctr": round(float(row[2]), 4),
-        "avg_view_pct": round(float(row[3]), 2),
-        "subscribers_gained": int(row[4]),
-        "shares": int(row[5]),
+        "avg_view_pct": round(float(row[1]), 2),
+        "subscribers_gained": int(row[2]),
+        "shares": int(row[3]),
     }
 
 def fetch_yt_video_metrics(creds, start, end):
@@ -82,7 +80,7 @@ def fetch_yt_video_metrics(creds, start, end):
         startDate=start.isoformat(),
         endDate=end.isoformat(),
         dimensions="video",
-        metrics="views,impressions,impressionsCtr,averageViewPercentage",
+        metrics="views,averageViewPercentage",
         sort="-views",
         maxResults=25,
     ).execute()
@@ -107,9 +105,7 @@ def fetch_yt_video_metrics(creds, start, end):
             "thumbnail": snip.get("thumbnails", {}).get("high", {}).get("url", ""),
             "published_at": snip.get("publishedAt", "")[:10],
             "views": int(row[1]),
-            "impressions": int(row[2]),
-            "ctr": round(float(row[3]), 4),
-            "avg_view_pct": round(float(row[4]), 2),
+            "avg_view_pct": round(float(row[2]), 2),
         })
     return results
 
@@ -176,8 +172,7 @@ def main():
 
     # Daily YouTube channel metrics
     ws_yt = get_or_create_sheet(sheet, "YouTube_Metrics", [
-        "date", "views", "impressions", "ctr",
-        "avg_view_pct", "subscribers_gained", "shares",
+        "date", "views", "avg_view_pct", "subscribers_gained", "shares",
     ])
     if not row_exists(ws_yt, rd.isoformat()):
         metrics = fetch_yt_channel_metrics(creds, rd)
@@ -190,7 +185,7 @@ def main():
     if today.weekday() == 6:
         ws_yt_vid = get_or_create_sheet(sheet, "YouTube_Videos", [
             "week_start", "video_id", "title", "thumbnail",
-            "published_at", "views", "impressions", "ctr", "avg_view_pct",
+            "published_at", "views", "avg_view_pct",
         ])
         ws_top = get_or_create_sheet(sheet, "Top_Performers", [
             "week_start", "platform", "content_id", "title",
