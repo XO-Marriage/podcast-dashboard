@@ -29,8 +29,8 @@ def sheets_client():
 # ── date helpers ───────────────────────────────────────────────────────────────
 
 def report_date():
-    # YouTube Analytics has a ~2 day processing lag
-    return date.today() - timedelta(days=2)
+    # YouTube Analytics has a ~3 day processing lag
+    return date.today() - timedelta(days=3)
 
 def current_week():
     today = date.today()
