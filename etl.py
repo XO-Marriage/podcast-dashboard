@@ -129,35 +129,69 @@ def meg_get(path, params=None):
     resp.raise_for_status()
     return resp.json()
 
-def fetch_megaphone_data(network_id, start, end):
+def _dl_sum(episode_id, start_date, end_date):
+    """Sum downloads for an episode over a date range."""
+    try:
+        data = meg_get(
+            f"/episodes/{episode_id}/analytics/downloads",
+            params={"startDate": start_date.isoformat(), "endDate": end_date.isoformat()},
+        )
+        return sum(d.get("downloads", 0) for d in data.get("downloads", []))
+    except Exception as e:
+        print(f"    analytics error for {episode_id}: {e}")
+        return 0
+
+def fetch_megaphone_data(network_id, week_start, week_end):
+    today       = date.today()
+    one_year_ago = today - timedelta(days=365)
+
     podcasts = meg_get(f"/networks/{network_id}/podcasts")
-    results = []
+    results  = []
 
     for podcast in podcasts:
-        pid = podcast["id"]
+        pid  = podcast["id"]
         page = 1
         while True:
             episodes = meg_get(f"/podcasts/{pid}/episodes", params={"page": page, "per": 50})
             if not episodes:
                 break
+
             for ep in episodes:
+                pub_str = (ep.get("pubdate") or "")[:10]
                 try:
-                    dl_data = meg_get(
-                        f"/episodes/{ep['id']}/analytics/downloads",
-                        params={"startDate": start.isoformat(), "endDate": end.isoformat()},
-                    )
-                    downloads = sum(d.get("downloads", 0) for d in dl_data.get("downloads", []))
-                except Exception as e:
-                    print(f"  Could not fetch downloads for episode {ep['id']}: {e}")
-                    downloads = 0
+                    pub_date = date.fromisoformat(pub_str) if pub_str else None
+                except ValueError:
+                    pub_date = None
+
+                # Skip episodes with no publish date or older than 1 year
+                if not pub_date or pub_date < one_year_ago:
+                    continue
+
+                eid          = ep["id"]
+                days_old     = (today - pub_date).days
+
+                # Weekly downloads (what happened this specific week)
+                weekly = _dl_sum(eid, week_start, week_end)
+
+                # Cumulative total from publish date → today
+                to_date = _dl_sum(eid, pub_date, today)
+
+                # First-window stats — only meaningful for recent episodes
+                if days_old <= 14:
+                    first_24h = _dl_sum(eid, pub_date, pub_date + timedelta(days=1))
+                    first_7d  = _dl_sum(eid, pub_date, pub_date + timedelta(days=7))
+                else:
+                    first_24h = 0
+                    first_7d  = 0
 
                 results.append({
-                    "episode_id": ep["id"],
+                    "episode_title": ep.get("title", ""),
                     "podcast_title": podcast.get("title", ""),
-                    "title": ep.get("title", ""),
-                    "published_at": (ep.get("pubdate") or "")[:10],
-                    "artwork_url": ep.get("imageFile") or podcast.get("imageFile", ""),
-                    "downloads": downloads,
+                    "downloads":     weekly,
+                    "published_at":  pub_str,
+                    "first_24h":     first_24h,
+                    "first_7d":      first_7d,
+                    "to_date":       to_date,
                 })
 
             if len(episodes) < 50:
@@ -233,23 +267,31 @@ def main():
         # Megaphone episode breakdown (skipped if API key not configured)
         if os.environ.get("MEGAPHONE_API_KEY") and network_id:
             ws_meg = get_or_create_sheet(sheet, "Megaphone_Episodes", [
-                "week_start", "episode_id", "podcast_title", "episode_title",
-                "published_at", "artwork_url", "downloads",
+                "week_start", "week_end", "episode_title", "podcast_title",
+                "downloads", "published_at", "first_24h", "first_7d", "to_date",
             ])
             if not row_exists(ws_meg, week_start.isoformat()):
                 episodes = fetch_megaphone_data(network_id, week_start, week_end)
-                for ep in episodes:
-                    ws_meg.append_row([week_start.isoformat()] + list(ep.values()))
-                print(f"Megaphone data written for week of {week_start} ({len(episodes)} episodes)")
+                rows = [
+                    [week_start.isoformat(), week_end.isoformat(),
+                     ep["episode_title"], ep["podcast_title"],
+                     ep["downloads"], ep["published_at"],
+                     ep["first_24h"], ep["first_7d"], ep["to_date"]]
+                    for ep in episodes
+                ]
+                for i in range(0, len(rows), 100):
+                    ws_meg.append_rows(rows[i:i+100], value_input_option="RAW")
+                print(f"Megaphone data written for week of {week_start} ({len(rows)} episodes)")
 
-                if episodes:
-                    top_ep = max(episodes, key=lambda x: x["downloads"])
+                with_downloads = [ep for ep in episodes if ep["downloads"] > 0]
+                if with_downloads:
+                    top_ep = max(with_downloads, key=lambda x: x["downloads"])
                     ws_top.append_row([
-                        week_start.isoformat(), "Megaphone",
-                        top_ep["episode_id"], top_ep["title"],
-                        top_ep["artwork_url"], top_ep["downloads"], "downloads",
+                        week_start.isoformat(), "Megaphone", "",
+                        top_ep["episode_title"], "",
+                        top_ep["downloads"], "downloads",
                     ])
-                    print(f"Top Megaphone episode: {top_ep['title']} ({top_ep['downloads']} downloads)")
+                    print(f"Top Megaphone episode: {top_ep['episode_title']} ({top_ep['downloads']} downloads)")
         else:
             print("Megaphone credentials not configured — skipping.")
 
