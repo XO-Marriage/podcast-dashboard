@@ -11,7 +11,7 @@ warnings.filterwarnings("ignore")
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="XO Marriage Podcast Dashboard",
+    page_title="Naked Marriage Podcast Dashboard",
     page_icon="🎙️",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -109,7 +109,7 @@ def load_data():
 yt_df, top_df, meg_df, vid_df = load_data()
 
 # ── Header & date picker ──────────────────────────────────────────────────────
-st.markdown("## 🎙️ XO Marriage Podcast Dashboard")
+st.markdown("## 🎙️ Naked Marriage Podcast Dashboard")
 
 col_range, col_spacer = st.columns([2, 5])
 with col_range:
