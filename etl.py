@@ -172,7 +172,7 @@ def main():
     creds = youtube_credentials()
     gc = sheets_client()
     sheet = gc.open_by_key(os.environ["GOOGLE_SHEET_ID"])
-    network_id = os.environ["MEGAPHONE_NETWORK_ID"]
+    network_id = os.environ.get("MEGAPHONE_NETWORK_ID", "")
 
     today = date.today()
     rd = report_date()
@@ -210,8 +210,9 @@ def main():
                 ws_yt_vid.append_row([week_start.isoformat()] + list(v.values()))
             print(f"YouTube video metrics written for week of {week_start} ({len(videos)} videos, {len(shorts)} shorts)")
 
-            if videos:
-                top = max(videos, key=lambda x: x["views"])
+            qualified_videos = [v for v in videos if v["views"] >= 200]
+            if qualified_videos:
+                top = max(qualified_videos, key=lambda x: x["views"])
                 ws_top.append_row([
                     week_start.isoformat(), "YouTube Video",
                     top["video_id"], top["title"],
@@ -219,8 +220,9 @@ def main():
                 ])
                 print(f"Top YouTube video: {top['title']} ({top['views']} views)")
 
-            if shorts:
-                top_short = max(shorts, key=lambda x: x["views"])
+            qualified_shorts = [s for s in shorts if s["views"] >= 200]
+            if qualified_shorts:
+                top_short = max(qualified_shorts, key=lambda x: x["views"])
                 ws_top.append_row([
                     week_start.isoformat(), "YouTube Short",
                     top_short["video_id"], top_short["title"],
@@ -228,25 +230,28 @@ def main():
                 ])
                 print(f"Top YouTube Short: {top_short['title']} ({top_short['views']} views)")
 
-        # Megaphone episode breakdown
-        ws_meg = get_or_create_sheet(sheet, "Megaphone_Episodes", [
-            "week_start", "episode_id", "podcast_title", "episode_title",
-            "published_at", "artwork_url", "downloads",
-        ])
-        if not row_exists(ws_meg, week_start.isoformat()):
-            episodes = fetch_megaphone_data(network_id, week_start, week_end)
-            for ep in episodes:
-                ws_meg.append_row([week_start.isoformat()] + list(ep.values()))
-            print(f"Megaphone data written for week of {week_start} ({len(episodes)} episodes)")
+        # Megaphone episode breakdown (skipped if API key not configured)
+        if os.environ.get("MEGAPHONE_API_KEY") and network_id:
+            ws_meg = get_or_create_sheet(sheet, "Megaphone_Episodes", [
+                "week_start", "episode_id", "podcast_title", "episode_title",
+                "published_at", "artwork_url", "downloads",
+            ])
+            if not row_exists(ws_meg, week_start.isoformat()):
+                episodes = fetch_megaphone_data(network_id, week_start, week_end)
+                for ep in episodes:
+                    ws_meg.append_row([week_start.isoformat()] + list(ep.values()))
+                print(f"Megaphone data written for week of {week_start} ({len(episodes)} episodes)")
 
-            if episodes:
-                top_ep = max(episodes, key=lambda x: x["downloads"])
-                ws_top.append_row([
-                    week_start.isoformat(), "Megaphone",
-                    top_ep["episode_id"], top_ep["title"],
-                    top_ep["artwork_url"], top_ep["downloads"], "downloads",
-                ])
-                print(f"Top Megaphone episode: {top_ep['title']} ({top_ep['downloads']} downloads)")
+                if episodes:
+                    top_ep = max(episodes, key=lambda x: x["downloads"])
+                    ws_top.append_row([
+                        week_start.isoformat(), "Megaphone",
+                        top_ep["episode_id"], top_ep["title"],
+                        top_ep["artwork_url"], top_ep["downloads"], "downloads",
+                    ])
+                    print(f"Top Megaphone episode: {top_ep['title']} ({top_ep['downloads']} downloads)")
+        else:
+            print("Megaphone credentials not configured — skipping.")
 
     print("ETL complete.")
 
