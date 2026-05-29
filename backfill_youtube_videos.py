@@ -12,7 +12,7 @@ SA_FILE     = Path(__file__).parent / "service_account.json"
 SECRET_FILE = Path(__file__).parent / "client_secret.json"
 TOKEN_FILE  = Path(__file__).parent / ".refresh_token"
 CONFIG_FILE = Path(__file__).parent / "config.txt"
-WEEKS_BACK  = 16  # ~4 months
+WEEKS_BACK  = 310  # full channel history (~6 years)
 
 def youtube_creds():
     s = json.loads(SECRET_FILE.read_text())["installed"]
@@ -89,7 +89,17 @@ def main():
     mondays = list(all_mondays(WEEKS_BACK))
     print(f"Weeks to process: {len(mondays)}")
 
-    new_rows = []
+    FLUSH_EVERY = 25  # write to sheet every N weeks to avoid rate limits
+    pending = []
+    total_written = 0
+
+    def flush(rows):
+        if not rows:
+            return
+        for i in range(0, len(rows), 100):
+            ws.append_rows(rows[i:i+100], value_input_option="RAW")
+            time.sleep(2)  # stay well under Sheets 60 writes/min limit
+
     for i, monday in enumerate(mondays):
         sunday = min(monday + timedelta(days=6), cutoff)
         if sunday < monday:
@@ -99,17 +109,27 @@ def main():
             continue
         print(f"  [{i+1}/{len(mondays)}] {monday} → {sunday} ...", end=" ", flush=True)
         videos = fetch_top_videos(analytics, data_svc, monday, sunday)
-        new_rows.extend([[v["week_start"],v["video_id"],v["title"],v["thumbnail"],
-                          v["published_at"],v["views"],v["avg_view_pct"]] for v in videos])
+        pending.extend([[v["week_start"],v["video_id"],v["title"],v["thumbnail"],
+                         v["published_at"],v["views"],v["avg_view_pct"]] for v in videos])
         print(f"{len(videos)} videos")
         time.sleep(0.5)
 
-    if new_rows:
-        print(f"\nWriting {len(new_rows)} rows...")
-        for i in range(0, len(new_rows), 100):
-            ws.append_rows(new_rows[i:i+100], value_input_option="RAW")
-            time.sleep(0.5)
-        print("Done.")
+        # Flush to sheet every FLUSH_EVERY weeks
+        weeks_done = i + 1 - sum(1 for m in mondays[:i+1] if m.isoformat() in existing)
+        if weeks_done % FLUSH_EVERY == 0 and pending:
+            print(f"  → Writing {len(pending)} rows to sheet...")
+            flush(pending)
+            total_written += len(pending)
+            pending = []
+
+    # Final flush
+    if pending:
+        print(f"\nWriting final {len(pending)} rows...")
+        flush(pending)
+        total_written += len(pending)
+
+    if total_written:
+        print(f"Done. Total rows written: {total_written}")
     else:
         print("Nothing new to write.")
 
