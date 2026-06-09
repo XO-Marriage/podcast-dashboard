@@ -201,7 +201,6 @@ else:
     fig = px.area(
         yt_f, x="date", y="views",
         color_discrete_sequence=["#e74c3c"],
-        template="plotly_dark",
     )
     fig.update_traces(line_width=1.5, fillcolor="rgba(231,76,60,0.15)")
     fig.update_layout(
@@ -209,8 +208,9 @@ else:
         height=220,
         xaxis_title=None, yaxis_title=None,
         plot_bgcolor="#1e2130", paper_bgcolor="#1e2130",
-        xaxis=dict(showgrid=False),
-        yaxis=dict(showgrid=True, gridcolor="#2a2d3e"),
+        font=dict(color="#9ba3b2"),
+        xaxis=dict(showgrid=False, color="#9ba3b2"),
+        yaxis=dict(showgrid=True, gridcolor="#2a2d3e", color="#9ba3b2"),
         hovermode="x unified",
     )
     st.plotly_chart(fig, use_container_width=True)
