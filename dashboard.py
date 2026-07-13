@@ -10,6 +10,11 @@ from pathlib import Path
 import warnings
 warnings.filterwarnings("ignore")
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
+
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.units import inch
@@ -497,17 +502,27 @@ def generate_pdf(yt_data, top_data, meg_data, best_data, label, views_total,
     # ── Views over time chart ─────────────────────────────────────────────────
     if not yt_data.empty:
         story += section("Views Over Time")
-        fig = px.area(yt_data, x="date", y="views", color_discrete_sequence=["#e74c3c"])
-        fig.update_traces(line_width=1.5, fillcolor="rgba(231,76,60,0.15)")
-        fig.update_layout(
-            margin=dict(l=30, r=10, t=10, b=30), height=200, width=720,
-            xaxis_title=None, yaxis_title=None,
-            plot_bgcolor="#1e2130", paper_bgcolor="#1e2130",
-            font=dict(color="#9ba3b2"),
-            xaxis=dict(showgrid=False, color="#9ba3b2"),
-            yaxis=dict(showgrid=True, gridcolor="#2a2d3e", color="#9ba3b2"),
-        )
-        chart_buf = io.BytesIO(fig.to_image(format="png", scale=2))
+        fig_mpl, ax = plt.subplots(figsize=(9.5, 2.2))
+        dates  = yt_data["date"].dt.to_pydatetime()
+        values = yt_data["views"].values
+        ax.fill_between(dates, values, alpha=0.15, color="#e74c3c")
+        ax.plot(dates, values, color="#e74c3c", linewidth=1.5)
+        ax.set_facecolor("#1e2130")
+        fig_mpl.patch.set_facecolor("#1e2130")
+        ax.tick_params(colors="#9ba3b2", labelsize=7)
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(
+            lambda x, _: f"{x/1000:.0f}K" if x >= 1000 else str(int(x))
+        ))
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.yaxis.grid(True, color="#2a2d3e", linewidth=0.5)
+        ax.set_axisbelow(True)
+        ax.xaxis.grid(False)
+        plt.tight_layout(pad=0.3)
+        chart_buf = io.BytesIO()
+        fig_mpl.savefig(chart_buf, format="png", dpi=150, bbox_inches="tight")
+        plt.close(fig_mpl)
+        chart_buf.seek(0)
         story.append(RLImage(chart_buf, width=W, height=2*inch))
         story.append(Spacer(1, 6))
 
