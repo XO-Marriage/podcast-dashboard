@@ -1,3 +1,4 @@
+import io
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -8,6 +9,17 @@ from datetime import date, timedelta
 from pathlib import Path
 import warnings
 warnings.filterwarnings("ignore")
+
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+    HRFlowable, KeepTogether,
+)
+from reportlab.platypus.flowables import Image as RLImage
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -375,6 +387,246 @@ else:
     display_meg["published_at"] = display_meg["published_at"].dt.strftime("%Y-%m-%d")
     display_meg.columns = ["Episode", "Podcast", "Published", "Downloads", "First 24h", "First 7 Days"]
     st.dataframe(display_meg, use_container_width=True, hide_index=True, height=400)
+
+# ── PDF Export ───────────────────────────────────────────────────────────────
+
+def generate_pdf(yt_data, top_data, meg_data, best_data, label, views_total,
+                 subs_total, avg_pct, shares_total, yt_prev_data, period_days_val):
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=letter,
+        leftMargin=0.6*inch, rightMargin=0.6*inch,
+        topMargin=0.6*inch, bottomMargin=0.6*inch,
+    )
+
+    # ── colour palette ────────────────────────────────────────────────────────
+    BG       = colors.HexColor("#1e2130")
+    ACCENT   = colors.HexColor("#e74c3c")
+    GREEN    = colors.HexColor("#27ae60")
+    ORANGE   = colors.HexColor("#e67e22")
+    MUTED    = colors.HexColor("#9ba3b2")
+    WHITE    = colors.white
+    DARK     = colors.HexColor("#12141f")
+    RULE     = colors.HexColor("#2a2d3e")
+
+    # ── styles ────────────────────────────────────────────────────────────────
+    base = getSampleStyleSheet()
+    title_style   = ParagraphStyle("title",   fontSize=20, textColor=WHITE,
+                                   fontName="Helvetica-Bold", spaceAfter=2)
+    sub_style     = ParagraphStyle("sub",     fontSize=9,  textColor=MUTED,
+                                   fontName="Helvetica",    spaceAfter=0)
+    section_style = ParagraphStyle("section", fontSize=9,  textColor=MUTED,
+                                   fontName="Helvetica-Bold", spaceBefore=14,
+                                   spaceAfter=4, letterSpacing=1.5)
+    cell_style    = ParagraphStyle("cell",    fontSize=8,  textColor=WHITE,
+                                   fontName="Helvetica",    leading=11)
+    small_style   = ParagraphStyle("small",   fontSize=7,  textColor=MUTED,
+                                   fontName="Helvetica")
+
+    def section(text):
+        return [
+            Paragraph(text.upper(), section_style),
+            HRFlowable(width="100%", thickness=0.5, color=RULE, spaceAfter=6),
+        ]
+
+    def delta_str(curr, prev):
+        if prev == 0:
+            return ""
+        pct = ((curr - prev) / prev) * 100
+        arrow = "▲" if pct >= 0 else "▼"
+        return f"{arrow} {abs(pct):.1f}%"
+
+    def fmt_n(n):
+        if n >= 1_000_000:
+            return f"{n/1_000_000:.1f}M"
+        if n >= 1_000:
+            return f"{n/1_000:.1f}K"
+        return str(int(n))
+
+    story = []
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    story.append(Paragraph("🎙 Naked Marriage Podcast Dashboard", title_style))
+    story.append(Paragraph(f"Report period: {label}  ·  Generated {date.today().strftime('%B %-d, %Y')}", sub_style))
+    story.append(Spacer(1, 10))
+    story.append(HRFlowable(width="100%", thickness=1, color=ACCENT, spaceAfter=10))
+
+    # ── YouTube KPIs ──────────────────────────────────────────────────────────
+    story += section("YouTube Performance")
+
+    prev_views = yt_prev_data["views"].sum() if not yt_prev_data.empty else 0
+    prev_subs  = yt_prev_data["subscribers_gained"].sum() if not yt_prev_data.empty else 0
+    prev_pct   = yt_prev_data["avg_view_pct"].mean() if not yt_prev_data.empty else 0
+    prev_sh    = yt_prev_data["shares"].sum() if not yt_prev_data.empty else 0
+
+    kpi_data = [
+        [
+            Paragraph(f'<font size="18"><b>{fmt_n(views_total)}</b></font>', ParagraphStyle("v", textColor=WHITE, fontName="Helvetica-Bold", fontSize=18, alignment=TA_CENTER)),
+            Paragraph(f'<font size="18"><b>{fmt_n(subs_total)}</b></font>',  ParagraphStyle("v", textColor=WHITE, fontName="Helvetica-Bold", fontSize=18, alignment=TA_CENTER)),
+            Paragraph(f'<font size="18"><b>{avg_pct:.1f}%</b></font>',        ParagraphStyle("v", textColor=WHITE, fontName="Helvetica-Bold", fontSize=18, alignment=TA_CENTER)),
+            Paragraph(f'<font size="18"><b>{fmt_n(shares_total)}</b></font>', ParagraphStyle("v", textColor=WHITE, fontName="Helvetica-Bold", fontSize=18, alignment=TA_CENTER)),
+        ],
+        [
+            Paragraph("Views",              ParagraphStyle("l", textColor=MUTED, fontName="Helvetica", fontSize=8, alignment=TA_CENTER)),
+            Paragraph("Subscribers Gained", ParagraphStyle("l", textColor=MUTED, fontName="Helvetica", fontSize=8, alignment=TA_CENTER)),
+            Paragraph("Avg % Viewed",       ParagraphStyle("l", textColor=MUTED, fontName="Helvetica", fontSize=8, alignment=TA_CENTER)),
+            Paragraph("Shares",             ParagraphStyle("l", textColor=MUTED, fontName="Helvetica", fontSize=8, alignment=TA_CENTER)),
+        ],
+        [
+            Paragraph(delta_str(views_total, prev_views), ParagraphStyle("d", textColor=GREEN if views_total >= prev_views else ACCENT, fontName="Helvetica", fontSize=8, alignment=TA_CENTER)),
+            Paragraph(delta_str(subs_total,  prev_subs),  ParagraphStyle("d", textColor=GREEN if subs_total  >= prev_subs  else ACCENT, fontName="Helvetica", fontSize=8, alignment=TA_CENTER)),
+            Paragraph(delta_str(avg_pct,     prev_pct),   ParagraphStyle("d", textColor=GREEN if avg_pct     >= prev_pct   else ACCENT, fontName="Helvetica", fontSize=8, alignment=TA_CENTER)),
+            Paragraph(delta_str(shares_total,prev_sh),    ParagraphStyle("d", textColor=GREEN if shares_total>= prev_sh    else ACCENT, fontName="Helvetica", fontSize=8, alignment=TA_CENTER)),
+        ],
+    ]
+
+    W = 7.3 * inch
+    kpi_table = Table(kpi_data, colWidths=[W/4]*4, rowHeights=[28, 14, 14])
+    kpi_table.setStyle(TableStyle([
+        ("BACKGROUND",  (0,0), (-1,-1), BG),
+        ("ROUNDEDCORNERS", [6]),
+        ("ALIGN",       (0,0), (-1,-1), "CENTER"),
+        ("VALIGN",      (0,0), (-1,-1), "MIDDLE"),
+        ("LINEAFTER",   (0,0), (2,-1),  0.5, RULE),
+        ("TOPPADDING",  (0,0), (-1,0),  10),
+        ("BOTTOMPADDING",(0,-1),(-1,-1),8),
+    ]))
+    story.append(kpi_table)
+    story.append(Spacer(1, 10))
+
+    # ── Views over time chart ─────────────────────────────────────────────────
+    if not yt_data.empty:
+        story += section("Views Over Time")
+        fig = px.area(yt_data, x="date", y="views", color_discrete_sequence=["#e74c3c"])
+        fig.update_traces(line_width=1.5, fillcolor="rgba(231,76,60,0.15)")
+        fig.update_layout(
+            margin=dict(l=30, r=10, t=10, b=30), height=200, width=720,
+            xaxis_title=None, yaxis_title=None,
+            plot_bgcolor="#1e2130", paper_bgcolor="#1e2130",
+            font=dict(color="#9ba3b2"),
+            xaxis=dict(showgrid=False, color="#9ba3b2"),
+            yaxis=dict(showgrid=True, gridcolor="#2a2d3e", color="#9ba3b2"),
+        )
+        chart_buf = io.BytesIO(fig.to_image(format="png", scale=2))
+        story.append(RLImage(chart_buf, width=W, height=2*inch))
+        story.append(Spacer(1, 6))
+
+    # ── Top Performers ────────────────────────────────────────────────────────
+    if not best_data.empty:
+        story += section("Top Performers")
+        platform_colors = {
+            "YouTube Video": ACCENT,
+            "YouTube Short": ORANGE,
+            "Megaphone":     GREEN,
+        }
+        for _, row in best_data.iterrows():
+            plat   = row.get("platform", "")
+            title  = row.get("title", "")[:90]
+            metric = int(row.get("metric_value", 0))
+            dlabel = row.get("date_label", "") or ""
+            mname  = "views" if "YouTube" in plat else "downloads"
+            pcol   = platform_colors.get(plat, MUTED)
+
+            row_data = [[
+                Paragraph(f'<font color="{pcol.hexval() if hasattr(pcol,"hexval") else "#ffffff"}"><b>[{plat}]</b></font>  {title}', cell_style),
+                Paragraph(f'<b>{fmt_n(metric)}</b> {mname}', ParagraphStyle("rv", textColor=WHITE, fontName="Helvetica-Bold", fontSize=9, alignment=TA_RIGHT)),
+            ]]
+            sub_row = [[
+                Paragraph(dlabel, small_style),
+                Paragraph("", small_style),
+            ]]
+            t = Table(row_data + sub_row, colWidths=[W*0.75, W*0.25])
+            t.setStyle(TableStyle([
+                ("BACKGROUND",    (0,0), (-1,-1), BG),
+                ("TOPPADDING",    (0,0), (-1,-1), 5),
+                ("BOTTOMPADDING", (0,-1),(-1,-1), 6),
+                ("LEFTPADDING",   (0,0), (-1,-1), 8),
+                ("RIGHTPADDING",  (0,0), (-1,-1), 8),
+                ("VALIGN",        (0,0), (-1,-1), "MIDDLE"),
+            ]))
+            story.append(KeepTogether([t, Spacer(1, 4)]))
+
+    # ── Megaphone Episodes ────────────────────────────────────────────────────
+    if not meg_data.empty:
+        story += section("Top Megaphone Episodes")
+        meg_display = (
+            meg_data
+            .sort_values("downloads", ascending=False)
+            .drop_duplicates(subset=["episode_title", "podcast_title"], keep="first")
+            .head(20)
+        )
+        header = [
+            Paragraph("<b>Episode</b>",     ParagraphStyle("th", textColor=MUTED, fontName="Helvetica-Bold", fontSize=7)),
+            Paragraph("<b>Published</b>",   ParagraphStyle("th", textColor=MUTED, fontName="Helvetica-Bold", fontSize=7)),
+            Paragraph("<b>Downloads</b>",   ParagraphStyle("th", textColor=MUTED, fontName="Helvetica-Bold", fontSize=7, alignment=TA_RIGHT)),
+            Paragraph("<b>First 24h</b>",   ParagraphStyle("th", textColor=MUTED, fontName="Helvetica-Bold", fontSize=7, alignment=TA_RIGHT)),
+            Paragraph("<b>First 7 Days</b>",ParagraphStyle("th", textColor=MUTED, fontName="Helvetica-Bold", fontSize=7, alignment=TA_RIGHT)),
+        ]
+        rows = [header]
+        for _, r in meg_display.iterrows():
+            pub = r["published_at"]
+            pub_str = pub.strftime("%-m/%-d/%Y") if pd.notna(pub) else ""
+            ep_title = str(r.get("episode_title",""))[:60]
+            rows.append([
+                Paragraph(ep_title, ParagraphStyle("tc", textColor=WHITE, fontName="Helvetica", fontSize=7, leading=9)),
+                Paragraph(pub_str,  ParagraphStyle("tc", textColor=WHITE, fontName="Helvetica", fontSize=7)),
+                Paragraph(fmt_n(int(r.get("downloads",0))),  ParagraphStyle("tc", textColor=WHITE, fontName="Helvetica", fontSize=7, alignment=TA_RIGHT)),
+                Paragraph(fmt_n(int(r.get("first_24h",0))),  ParagraphStyle("tc", textColor=WHITE, fontName="Helvetica", fontSize=7, alignment=TA_RIGHT)),
+                Paragraph(fmt_n(int(r.get("first_7d",0))),   ParagraphStyle("tc", textColor=WHITE, fontName="Helvetica", fontSize=7, alignment=TA_RIGHT)),
+            ])
+        meg_table = Table(rows, colWidths=[W*0.44, W*0.13, W*0.14, W*0.14, W*0.15])
+        meg_table.setStyle(TableStyle([
+            ("BACKGROUND",    (0,0), (-1,0),  colors.HexColor("#12141f")),
+            ("BACKGROUND",    (0,1), (-1,-1), BG),
+            ("ROWBACKGROUNDS",(0,1), (-1,-1), [BG, colors.HexColor("#252940")]),
+            ("LINEBELOW",     (0,0), (-1,0),  0.5, RULE),
+            ("TOPPADDING",    (0,0), (-1,-1), 4),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+            ("LEFTPADDING",   (0,0), (-1,-1), 6),
+            ("RIGHTPADDING",  (0,0), (-1,-1), 6),
+            ("VALIGN",        (0,0), (-1,-1), "MIDDLE"),
+        ]))
+        story.append(meg_table)
+
+    # ── Footer ────────────────────────────────────────────────────────────────
+    story.append(Spacer(1, 16))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=RULE))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(
+        f"Naked Marriage · xomarriage-podcast.streamlit.app · YouTube data has a 3-day processing lag",
+        ParagraphStyle("foot", textColor=MUTED, fontName="Helvetica", fontSize=7, alignment=TA_CENTER),
+    ))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf
+
+
+# ── PDF download button ───────────────────────────────────────────────────────
+st.markdown('<div class="section-header">Export</div>', unsafe_allow_html=True)
+
+if st.button("⬇ Download PDF Report"):
+    with st.spinner("Building PDF…"):
+        pdf_buf = generate_pdf(
+            yt_data=yt_f,
+            top_data=top_f,
+            meg_data=meg_f if not meg_f.empty else meg_df,
+            best_data=best if not best.empty else pd.DataFrame(),
+            label=f"{start_date.strftime('%b %-d')} – {end_date.strftime('%b %-d, %Y')}",
+            views_total=int(yt_f["views"].sum()),
+            subs_total=int(yt_f["subscribers_gained"].sum()),
+            avg_pct=float(yt_f["avg_view_pct"].mean()) if not yt_f.empty else 0.0,
+            shares_total=int(yt_f["shares"].sum()),
+            yt_prev_data=yt_prev,
+            period_days_val=period_days,
+        )
+    filename = f"podcast_report_{start_date}_{end_date}.pdf"
+    st.download_button(
+        label="📄 Click to save PDF",
+        data=pdf_buf,
+        file_name=filename,
+        mime="application/pdf",
+    )
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("---")
